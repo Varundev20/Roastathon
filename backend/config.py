@@ -77,6 +77,10 @@ GEMINI_MODELS = list(dict.fromkeys([GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.
 GEMINI_REASONING_EFFORT = os.getenv("GEMINI_REASONING_EFFORT", "low")
 GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", 8192))
 GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", 120))
+# Attempts per model when Gemini is busy (503) or rate-limited (429); after
+# that the next model in GEMINI_MODELS is tried.
+GEMINI_RETRIES = int(os.getenv("GEMINI_RETRIES", 2))
+GEMINI_RETRY_DELAY_SECONDS = float(os.getenv("GEMINI_RETRY_DELAY_SECONDS", 2))
 
 # "gemini" when a key is present, otherwise the local Ollama runtime.
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini" if GEMINI_API_KEY else "ollama").strip().lower()

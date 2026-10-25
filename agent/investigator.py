@@ -82,6 +82,9 @@ class ModelUnavailable(RuntimeError):
     pass
 
 
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
 # --- Ollama ---------------------------------------------------------------
 
 def ollama_status(base_url: str = config.OLLAMA_URL) -> dict[str, Any]:
@@ -187,17 +190,40 @@ def gemini_chat(messages: list[dict], model: str, tools_schema=None, response_fo
     url = f"{(base_url or config.GEMINI_URL).rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {config.GEMINI_API_KEY}"}
     started = time.perf_counter()
-    try:
+
+    def post() -> requests.Response:
         resp = requests.post(url, json=payload, headers=headers, timeout=config.GEMINI_TIMEOUT_SECONDS)
-        if resp.status_code == 400 and response_format:
+        if resp.status_code == 400 and response_format and payload["response_format"]["type"] != "json_object":
             # Older endpoint versions reject json_schema; plain JSON mode still
             # works and the report is validated afterwards anyway.
             payload["response_format"] = {"type": "json_object"}
             resp = requests.post(url, json=payload, headers=headers, timeout=config.GEMINI_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
-        raise ModelUnavailable(f"Could not reach the Gemini API: {type(exc).__name__}") from exc
-    if resp.status_code != 200:
-        raise ModelUnavailable(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+        return resp
+
+    # Busy (503), rate-limited (429) or flaky (5xx) models are retried with a
+    # short backoff, then the other Gemini models are tried in order.
+    candidates = list(dict.fromkeys([model, *config.GEMINI_MODELS]))
+    last_error = "no attempt made"
+    resp = None
+    for candidate in candidates:
+        payload["model"] = candidate
+        for attempt in range(config.GEMINI_RETRIES):
+            if attempt:
+                time.sleep(config.GEMINI_RETRY_DELAY_SECONDS * attempt)
+            try:
+                resp = post()
+            except requests.RequestException as exc:
+                last_error = f"Could not reach the Gemini API: {type(exc).__name__}"
+                continue
+            if resp.status_code == 200:
+                break
+            last_error = f"Gemini API error {resp.status_code} ({candidate}): {resp.text[:300]}"
+            if resp.status_code not in RETRYABLE_STATUS:
+                raise ModelUnavailable(last_error)
+        if resp is not None and resp.status_code == 200:
+            break
+    else:
+        raise ModelUnavailable(last_error)
     data = resp.json()
     try:
         msg = data["choices"][0]["message"]
@@ -219,6 +245,7 @@ def gemini_chat(messages: list[dict], model: str, tools_schema=None, response_fo
     # A fenced ```json block still parses after the fences are removed.
     content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
     return {
+        "model": payload["model"],
         "message": {"role": "assistant", "content": content, "tool_calls": calls},
         "eval_count": (data.get("usage") or {}).get("completion_tokens", 0),
         "eval_duration": int((time.perf_counter() - started) * 1e9),
@@ -350,6 +377,10 @@ def investigate(alert_id: int, model: str | None = None,
 
     def count_tokens(resp: dict) -> None:
         inv.tokens_generated += resp.get("eval_count", 0)
+        used = resp.get("model")
+        note = f"{inv.model} was busy; {used} answered instead."
+        if used and used != inv.model and note not in inv.warnings:
+            inv.warnings.append(note)
         eval_ns.append(resp.get("eval_duration", 0))
 
     eval_ns: list[int] = []

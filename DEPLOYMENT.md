@@ -91,6 +91,8 @@ Check that `.env` and `*.db` are **not** pushed (they are in `.gitignore`).
 | `GEMINI_REASONING_EFFORT` | `low` | `low` / `medium` / `high`. Gemini 3 cannot turn thinking off |
 | `GEMINI_MAX_TOKENS` | `8192` | Output cap per request (includes thinking tokens) |
 | `GEMINI_TIMEOUT_SECONDS` | `120` | Per request |
+| `GEMINI_RETRIES` | `2` | Attempts per model on 429/5xx before trying the next model |
+| `GEMINI_RETRY_DELAY_SECONDS` | `2` | Backoff between attempts |
 | `NODE_SENTINEL_BURST_THRESHOLD` | `3000` | Rule 1 threshold |
 | `NODE_SENTINEL_PORT_SPREAD_THRESHOLD` | `50` | Rule 2 threshold |
 
@@ -115,6 +117,7 @@ Unset `GEMINI_API_KEY` (or set `LLM_PROVIDER=ollama`) to go back to the offline 
 | `Gemini API error 400` / `403` | Key wrong or not enabled → create a new key in AI Studio, update `GEMINI_API_KEY` |
 | `Gemini API error 404` | Model name retired → set `GEMINI_MODEL` to a current one from <https://ai.google.dev/gemini-api/docs/models> |
 | `Gemini API error 429` | Free-tier rate limit → wait a minute or enable billing |
+| `Gemini API error 503 … high demand` | Google's servers for that model are overloaded (not your key). The app retries and then tries `gemini-3.6-flash` and `gemini-3.5-flash-lite` automatically; if all are busy, try again in a minute or set `GEMINI_MODEL=gemini-3.5-flash-lite` |
 | First visit takes ~1 minute | Free Render services sleep after 15 min idle; the first request wakes them up |
 | Alerts/investigations disappear | Free Render disks are temporary: the SQLite DB resets on every deploy/restart. Just press **Run detection** again. For persistence, use a paid instance with a Disk mounted at e.g. `/var/data` and set `NODE_SENTINEL_DB_PATH=/var/data/node_sentinel.db` |
 
