@@ -63,3 +63,24 @@ MODEL_OPTIONS = {"temperature": 0, "seed": 42, "num_ctx": 8192}
 MAX_TOKENS_TOOL_ROUND = 700
 MAX_TOKENS_REPORT = 900
 MAX_TOOL_ROUNDS = 4
+
+# --- Hosted AI (Google Gemini) -----------------------------------------------
+# Used for the internet deployment (Render), where no local Ollama exists.
+# The key is only ever read from the environment; never commit it.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+GEMINI_URL = os.getenv("GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODELS = list(dict.fromkeys([GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.6-flash",
+                                    "gemini-3.5-flash-lite"]))
+# Gemini 3 models always "think" and thinking tokens count against the output
+# cap, so the caps are higher than for the small local model.
+GEMINI_REASONING_EFFORT = os.getenv("GEMINI_REASONING_EFFORT", "low")
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", 8192))
+GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", 120))
+
+# "gemini" when a key is present, otherwise the local Ollama runtime.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini" if GEMINI_API_KEY else "ollama").strip().lower()
+
+
+def default_model() -> str:
+    return GEMINI_MODEL if LLM_PROVIDER == "gemini" else OLLAMA_MODEL

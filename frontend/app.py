@@ -63,7 +63,9 @@ def bullet_list(items) -> str:
 
 # --- Header -------------------------------------------------------------------
 
-status = investigator.ollama_status()
+status = investigator.model_status()
+hosted = status["provider"] == "gemini"
+ai_name = "Gemini" if hosted else "local AI"
 datasets = list_datasets(config.SAMPLE_DIR, config.INPUT_DIR)
 if not datasets:
     st.error(f"No CSV files found in {config.SAMPLE_DIR} or {config.INPUT_DIR}.")
@@ -73,13 +75,18 @@ names = list(datasets)
 left, right = st.columns([3, 2], vertical_alignment="center")
 with left:
     st.markdown("## 🛡️ Node Sentinel")
-    st.markdown('<span class="ns-muted">Rules spot unusual traffic. A local AI explains it.</span>',
-                unsafe_allow_html=True)
+    st.markdown(f'<span class="ns-muted">Rules spot unusual traffic. {"Gemini" if hosted else "A local AI"} '
+                'explains it.</span>', unsafe_allow_html=True)
 with right:
-    runtime = badge(f"🖥️ {config.OLLAMA_MODEL} · local", "ok") if status["running"] \
-        else badge("Local model offline · fallback mode", "warn")
-    st.markdown(f'<div style="text-align:right">{runtime}{badge("🔒 No cloud calls", "info")}</div>',
-                unsafe_allow_html=True)
+    if hosted:
+        runtime = badge(f"☁️ {config.GEMINI_MODEL} · Gemini API", "ok") if status["running"] \
+            else badge("GEMINI_API_KEY not set · fallback mode", "warn")
+        privacy = badge("🔒 Only alert summaries are sent", "info")
+    else:
+        runtime = badge(f"🖥️ {config.OLLAMA_MODEL} · local", "ok") if status["running"] \
+            else badge("Local model offline · fallback mode", "warn")
+        privacy = badge("🔒 No cloud calls", "info")
+    st.markdown(f'<div style="text-align:right">{runtime}{privacy}</div>', unsafe_allow_html=True)
 
 with st.container(border=True):
     c1, c2, c3 = st.columns([3, 1.2, 2], vertical_alignment="bottom")
@@ -88,10 +95,14 @@ with st.container(border=True):
                            help="data/sample_data/ ships with the repo. Full CICIDS2017 files are listed if "
                                 "NODE_SENTINEL_INPUT_DIR points at them (large files take a minute).")
     run = c2.button("▶ Run detection", type="primary", width="stretch")
-    choices = [m for m in config.FALLBACK_MODELS if m in status["models"]] or status["models"] \
-        or [config.OLLAMA_MODEL]
-    model = c3.selectbox("Local model", choices,
-                         index=choices.index(config.OLLAMA_MODEL) if config.OLLAMA_MODEL in choices else 0)
+    if hosted:
+        choices = status["models"]
+    else:
+        choices = [m for m in config.FALLBACK_MODELS if m in status["models"]] or status["models"] \
+            or [config.OLLAMA_MODEL]
+    default_model = config.default_model()
+    model = c3.selectbox("AI model" if hosted else "Local model", choices,
+                         index=choices.index(default_model) if default_model in choices else 0)
 
 if run:
     with st.spinner("Loading flows and running rules..."):
@@ -110,7 +121,7 @@ if info is None:
     for col, (icon, title, text) in zip(st.columns(3), [
         ("📄", "1 · Load traffic", "Read network flow records from a CSV file."),
         ("🚨", "2 · Rules flag", "Two transparent rules check every source, minute by minute."),
-        ("🧠", "3 · AI explains", "A local model investigates with read-only tools."),
+        ("🧠", "3 · AI explains", f"{'Gemini' if hosted else 'A local model'} investigates with read-only tools."),
     ]):
         with col.container(border=True):
             st.markdown(f"### {icon}\n**{title}**\n\n{text}")
@@ -215,7 +226,7 @@ with tab_investigate:
                     st.dataframe(pd.DataFrame(alert.evidence["per_window"]), hide_index=True, width="stretch")
 
                 b1, b2 = st.columns(2)
-                investigate = b1.button("✨ Investigate with local AI", type="primary", width="stretch")
+                investigate = b1.button(f"✨ Investigate with {ai_name}", type="primary", width="stretch")
                 if alert.status != "reviewed":
                     if b2.button("✓ Mark reviewed", width="stretch"):
                         storage.set_alert_status(alert.alert_id, "reviewed")
@@ -243,7 +254,8 @@ with tab_investigate:
 
             history = storage.list_investigations(alert.alert_id)
             if not history:
-                st.caption("Not investigated yet. The AI takes about a minute on a laptop CPU.")
+                st.caption("Not investigated yet. " + ("Gemini usually answers in under a minute." if hosted
+                           else "The AI takes about a minute on a laptop CPU."))
             else:
                 latest = history[0]
                 report = latest["report"]

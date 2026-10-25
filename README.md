@@ -116,6 +116,9 @@ richer text but always reasons before each tool call (~400 extra tokens per call
 
 ## Setup instructions
 
+> **Online deployment:** the app can run on Render with the Google Gemini API instead of
+> local Ollama. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
 1. **Prerequisites:** Python 3.10+ (tested on 3.12), [Ollama](https://ollama.com).
 2. **Install dependencies**
    ```powershell

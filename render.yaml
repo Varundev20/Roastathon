@@ -1,0 +1,25 @@
+# Render Blueprint: one free web service running the Streamlit dashboard.
+# Render -> New -> Blueprint -> pick this repository. You'll be asked for
+# GEMINI_API_KEY (sync: false keeps it out of git). See DEPLOYMENT.md.
+services:
+  - type: web
+    name: node-sentinel
+    runtime: python
+    plan: free
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: >-
+      streamlit run frontend/app.py
+      --server.port $PORT
+      --server.address 0.0.0.0
+      --server.headless true
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash

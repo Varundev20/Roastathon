@@ -11,3 +11,7 @@ toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Render (and most hosts) run the app without a browser on the machine.
+headless = true

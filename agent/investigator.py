@@ -1,4 +1,4 @@
-"""AI alert investigator: a small local model + read-only tools + guardrails.
+"""AI alert investigator: a model (local Ollama or Gemini) + read-only tools + guardrails.
 
 Flow for one investigation:
   1. The model is asked to investigate one alert and may call the tools in
@@ -94,9 +94,32 @@ def ollama_status(base_url: str = config.OLLAMA_URL) -> dict[str, Any]:
         return {"running": False, "models": []}
 
 
+def model_status() -> dict[str, Any]:
+    """Status of the configured AI provider, for the dashboard header."""
+    if config.LLM_PROVIDER == "gemini":
+        # Not pinged on every page load: that would spend quota. A bad key
+        # shows up as a clear error (and a fallback report) on Investigate.
+        return {"provider": "gemini", "running": bool(config.GEMINI_API_KEY),
+                "models": config.GEMINI_MODELS}
+    return {"provider": "ollama", **ollama_status()}
+
+
 def chat(messages: list[dict], model: str, tools_schema=None, response_format=None,
          max_tokens: int = config.MAX_TOKENS_REPORT,
-         base_url: str = config.OLLAMA_URL) -> dict[str, Any]:
+         base_url: str | None = None) -> dict[str, Any]:
+    """Send one chat request to the configured provider.
+
+    Messages and the returned dict use Ollama's format; the Gemini backend
+    converts to and from it, so the agent loop is the same for both."""
+    if config.LLM_PROVIDER == "gemini":
+        return gemini_chat(messages, model, tools_schema, response_format, base_url=base_url)
+    return ollama_chat(messages, model, tools_schema, response_format, max_tokens,
+                       base_url=base_url or config.OLLAMA_URL)
+
+
+def ollama_chat(messages: list[dict], model: str, tools_schema=None, response_format=None,
+                max_tokens: int = config.MAX_TOKENS_REPORT,
+                base_url: str = config.OLLAMA_URL) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model, "messages": messages, "stream": False,
         "think": False, "options": {**config.MODEL_OPTIONS, "num_predict": max_tokens},
@@ -112,6 +135,94 @@ def chat(messages: list[dict], model: str, tools_schema=None, response_format=No
     except requests.RequestException as exc:
         raise ModelUnavailable(f"Could not reach the local model: {exc}") from exc
     return resp.json()
+
+
+# --- Gemini (OpenAI-compatible endpoint) -------------------------------------
+
+def _to_openai_messages(messages: list[dict]) -> list[dict]:
+    """Ollama-style messages -> OpenAI-style (tool calls need ids)."""
+    out: list[dict] = []
+    pending: list[tuple[str, str]] = []  # (tool name, call id) awaiting a result
+    for m in messages:
+        role = m["role"]
+        if role == "assistant":
+            calls = []
+            for call in m.get("tool_calls") or []:
+                fn = call.get("function", {})
+                call_id = call.get("id") or f"call_{len(out)}_{len(calls)}"
+                args = fn.get("arguments") or {}
+                calls.append({"id": call_id, "type": "function", "function": {
+                    "name": fn.get("name", ""),
+                    "arguments": args if isinstance(args, str) else json.dumps(args)}})
+                pending.append((fn.get("name", ""), call_id))
+            if calls:
+                out.append({"role": "assistant", "content": m.get("content") or None, "tool_calls": calls})
+            elif m.get("content"):
+                out.append({"role": "assistant", "content": m["content"]})
+        elif role == "tool":
+            name = m.get("tool_name", "")
+            idx = next((i for i, (n, _) in enumerate(pending) if n == name), 0 if pending else None)
+            call_id = pending.pop(idx)[1] if idx is not None else "call_unknown"
+            out.append({"role": "tool", "tool_call_id": call_id, "content": m["content"]})
+        else:
+            out.append({"role": role, "content": m["content"]})
+    return out
+
+
+def gemini_chat(messages: list[dict], model: str, tools_schema=None, response_format=None,
+                base_url: str | None = None) -> dict[str, Any]:
+    if not config.GEMINI_API_KEY:
+        raise ModelUnavailable("GEMINI_API_KEY is not set.")
+    payload: dict[str, Any] = {
+        "model": model, "messages": _to_openai_messages(messages), "temperature": 0,
+        "max_tokens": config.GEMINI_MAX_TOKENS,
+    }
+    if config.GEMINI_REASONING_EFFORT:
+        payload["reasoning_effort"] = config.GEMINI_REASONING_EFFORT
+    if tools_schema:
+        payload["tools"] = tools_schema
+    if response_format:
+        payload["response_format"] = {"type": "json_schema",
+                                      "json_schema": {"name": "report", "schema": response_format}}
+    url = f"{(base_url or config.GEMINI_URL).rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {config.GEMINI_API_KEY}"}
+    started = time.perf_counter()
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=config.GEMINI_TIMEOUT_SECONDS)
+        if resp.status_code == 400 and response_format:
+            # Older endpoint versions reject json_schema; plain JSON mode still
+            # works and the report is validated afterwards anyway.
+            payload["response_format"] = {"type": "json_object"}
+            resp = requests.post(url, json=payload, headers=headers, timeout=config.GEMINI_TIMEOUT_SECONDS)
+    except requests.RequestException as exc:
+        raise ModelUnavailable(f"Could not reach the Gemini API: {type(exc).__name__}") from exc
+    if resp.status_code != 200:
+        raise ModelUnavailable(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    try:
+        msg = data["choices"][0]["message"]
+    except (KeyError, IndexError) as exc:
+        raise ModelUnavailable("Gemini API returned no answer.") from exc
+
+    calls = []
+    for call in msg.get("tool_calls") or []:
+        fn = call.get("function", {})
+        args = fn.get("arguments") or "{}"
+        try:
+            args = json.loads(args) if isinstance(args, str) else args
+        except json.JSONDecodeError:
+            args = {}
+        calls.append({"id": call.get("id"), "function": {"name": fn.get("name", ""), "arguments": args}})
+    content = msg.get("content") or ""
+    if isinstance(content, list):  # some responses split text into parts
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    # A fenced ```json block still parses after the fences are removed.
+    content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+    return {
+        "message": {"role": "assistant", "content": content, "tool_calls": calls},
+        "eval_count": (data.get("usage") or {}).get("completion_tokens", 0),
+        "eval_duration": int((time.perf_counter() - started) * 1e9),
+    }
 
 
 # --- Validation -------------------------------------------------------------
@@ -214,11 +325,12 @@ def _clean(content: str) -> str:
     return THINK_BLOCK.sub("", content or "").strip()
 
 
-def investigate(alert_id: int, model: str = config.OLLAMA_MODEL,
-                db_path=None, base_url: str = config.OLLAMA_URL,
+def investigate(alert_id: int, model: str | None = None,
+                db_path=None, base_url: str | None = None,
                 on_tool_call: Callable[[ToolCall], None] | None = None) -> Investigation:
     """Run one investigation. `on_tool_call` (optional) is called after each
     tool runs, so a UI can show the agent's progress live."""
+    model = model or config.default_model()
     started = time.perf_counter()
     inv = Investigation(alert_id=alert_id, model=model, status="ok", report={},
                         started_at=datetime.now().isoformat(timespec="seconds"))

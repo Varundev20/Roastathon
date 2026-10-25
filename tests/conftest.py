@@ -40,3 +40,11 @@ def stored_alert(db):
     alerts = detect(flows, burst_threshold=1000, port_spread_threshold=50)
     storage.save_analysis("test.csv", flows, alerts, db_path=db)
     return alerts[0]
+
+
+@pytest.fixture(autouse=True)
+def local_provider(monkeypatch):
+    """Tests use the Ollama code path unless a test switches to Gemini,
+    even when GEMINI_API_KEY happens to be set in the shell."""
+    from backend import config
+    monkeypatch.setattr(config, "LLM_PROVIDER", "ollama")
