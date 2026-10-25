@@ -29,6 +29,22 @@ SAMPLES = [
      "7/7/2017 3:53", "7/7/2017 3:59"),
     ("benign_sample.csv", "Monday-WorkingHours.pcap_ISCX.csv",
      "03/07/2017 09:00", "03/07/2017 09:09"),
+    # Detected: DoS Hulk flood (connection burst).
+    ("dos_hulk_sample.csv", "Wednesday-workingHours.pcap_ISCX.csv",
+     "5/7/2017 10:41", "5/7/2017 10:45"),
+    # Detected, but labelled BENIGN: 192.168.10.8 sweeping many ports while
+    # the infiltration attack runs (false positives by the labels).
+    ("infiltration_sample.csv", "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv",
+     "6/7/2017 3:08", "6/7/2017 3:16"),
+    # Missed by design (low-rate attacks): known limitations of the rules.
+    ("slow_dos_sample.csv", "Wednesday-workingHours.pcap_ISCX.csv",
+     "5/7/2017 10:18", "5/7/2017 10:26"),
+    ("ftp_patator_sample.csv", "Tuesday-WorkingHours.pcap_ISCX.csv",
+     "4/7/2017 9:20", "4/7/2017 9:28"),
+    ("web_attack_sample.csv", "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+     "6/7/2017 9:36", "6/7/2017 9:44"),
+    ("bot_sample.csv", "Friday-WorkingHours-Morning.pcap_ISCX.csv",
+     "7/7/2017 10:40", "7/7/2017 10:49"),
 ]
 
 
@@ -55,7 +71,8 @@ def main() -> None:
         df = df.dropna(subset=["Timestamp"])
         keys = df["Timestamp"].map(minute_key)
         part = df.loc[(keys >= minute_key(first)) & (keys <= minute_key(last)), COLUMNS]
-        part.to_csv(out_dir / out_name, index=False, encoding="utf-8")
+        # cp1252 like the originals: the web-attack labels contain an en dash.
+        part.to_csv(out_dir / out_name, index=False, encoding="cp1252")
         size_mb = (out_dir / out_name).stat().st_size / 1e6
         print(f"{out_name}: {len(part):,} rows, {size_mb:.1f} MB, "
               f"labels={part['Label'].value_counts().to_dict()}")

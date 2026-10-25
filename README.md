@@ -149,11 +149,20 @@ Run the tests: `pytest` · Re-create the repeat-run log: `python scripts/repeat_
 `data/sample_data/` holds a few minutes of real, unmodified flows (13 of the 85 columns)
 from the **CICIDS2017** dataset (Canadian Institute for Cybersecurity, UNB):
 
-| File | Flows | Content |
-|---|---|---|
-| `portscan_sample.csv` | 24,167 | Fri 7 Jul 2017 15:05–15:15, benign + PortScan |
-| `ddos_sample.csv` | 35,417 | Fri 7 Jul 2017 15:53–15:59, benign + DDoS |
-| `benign_sample.csv` | 5,875 | Mon 3 Jul 2017 09:00–09:09, benign only |
+| File | Flows | Content | Alerts |
+|---|---|---|---|
+| `portscan_sample.csv` | 24,167 | Fri 7 Jul 2017 15:05–15:15, benign + PortScan | 2 (caught) |
+| `ddos_sample.csv` | 35,417 | Fri 7 Jul 2017 15:53–15:59, benign + DDoS | 1 (caught) |
+| `dos_hulk_sample.csv` | 54,548 | Wed 5 Jul 2017 10:41–10:45, benign + DoS Hulk | 1 (caught) |
+| `infiltration_sample.csv` | 23,159 | Thu 6 Jul 2017 15:08–15:16, infiltration; `192.168.10.8` sweeps ports | 3 (labelled benign: triage case) |
+| `benign_sample.csv` | 5,875 | Mon 3 Jul 2017 09:00–09:09, benign only | 0 (correct) |
+| `slow_dos_sample.csv` | 12,016 | Wed 5 Jul 2017 10:18–10:26, benign + DoS Slowhttptest | 0 (missed: low rate) |
+| `ftp_patator_sample.csv` | 12,630 | Tue 4 Jul 2017 09:20–09:28, benign + FTP brute force | 0 (missed: low rate) |
+| `web_attack_sample.csv` | 12,502 | Thu 6 Jul 2017 09:36–09:44, benign + web brute force | 0 (missed: low rate) |
+| `bot_sample.csv` | 4,819 | Fri 7 Jul 2017 10:40–10:49, benign + Bot | 0 (missed: low rate) |
+
+The "missed" files are included on purpose: they show the limits of volume and
+port-spread rules (see *Known limitations*) and the Accuracy tab reports 0% recall for them.
 
 `scripts/make_sample.py` regenerates them from the full CSV files. If the full files
 are placed in `../Input_csv` (or `NODE_SENTINEL_INPUT_DIR`), the app lists them too.
@@ -170,7 +179,10 @@ encoding; timestamps with minute resolution on a 12-hour clock **without AM/PM**
 |---|---|---|---|---|
 | `portscan_sample.csv` | 11,038 | 11,036 | 100% | 99.98% |
 | `ddos_sample.csv` | 23,865 | 21,427 | 100% | 89.8% |
+| `dos_hulk_sample.csv` | 48,618 | 48,618 | 99.9% | 100% |
+| `infiltration_sample.csv` | 4 | 4 | 0.03% ⚠️ | 100% |
 | `benign_sample.csv` | 0 | 0 | – (0 false alerts) | – |
+| `slow_dos_sample.csv` · `ftp_patator_sample.csv` · `web_attack_sample.csv` · `bot_sample.csv` | 2,897 · 1,190 · 349 · 482 | 0 | – (0 alerts) | 0% |
 
 The samples are hand-picked, so the rules were also run on **all 8 full CICIDS2017
 files (~2.8 M flows)**:
